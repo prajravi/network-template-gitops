@@ -21,6 +21,7 @@ pipeline {
         IMAGE_NAME  = "network-template-gitops"
         DOCKER_BIN  = "/usr/local/bin/docker"
         ENV_FILE    = "${WORKSPACE}/.env"
+        PATH        = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     }
 
     stages {
