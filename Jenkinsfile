@@ -26,6 +26,18 @@ pipeline {
 
     stages {
 
+        stage('Resolve Branch') {
+            steps {
+                script {
+                    // BRANCH_NAME is only set in multibranch pipelines.
+                    // For a regular pipeline job, derive from GIT_BRANCH (e.g. "origin/main" -> "main").
+                    env.RESOLVED_BRANCH = env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceFirst(/^origin\//, '') ?: 'main'
+                    echo "Resolved branch: ${env.RESOLVED_BRANCH}"
+                    echo "Commit SHA: ${env.GIT_COMMIT}"
+                }
+            }
+        }
+
         stage('Docker Build') {
             steps {
                 script {
@@ -52,7 +64,7 @@ pipeline {
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
-                        --branch ${env.BRANCH_NAME} \
+                        --branch ${env.RESOLVED_BRANCH} \
                         --stage validate-stage
                     """
                     echo "Stage validation passed."
@@ -69,7 +81,7 @@ pipeline {
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
-                        --branch ${env.BRANCH_NAME} \
+                        --branch ${env.RESOLVED_BRANCH} \
                         --stage drift-check
                     """
                     echo "Drift check passed."
@@ -79,7 +91,7 @@ pipeline {
 
         stage('Approval Gate') {
             when {
-                branch 'main'
+                expression { env.RESOLVED_BRANCH == 'main' }
             }
             steps {
                 input message: 'Approve promotion to Prod?', submitter: ''
@@ -88,7 +100,7 @@ pipeline {
 
         stage('Re-validate Drift') {
             when {
-                branch 'main'
+                expression { env.RESOLVED_BRANCH == 'main' }
             }
             steps {
                 script {
@@ -98,7 +110,7 @@ pipeline {
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
-                        --branch ${env.BRANCH_NAME} \
+                        --branch ${env.RESOLVED_BRANCH} \
                         --stage drift-check
                     """
                     echo "Post-approval drift check passed."
@@ -108,7 +120,7 @@ pipeline {
 
         stage('Promote to Prod') {
             when {
-                branch 'main'
+                expression { env.RESOLVED_BRANCH == 'main' }
             }
             steps {
                 script {
@@ -118,7 +130,7 @@ pipeline {
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
-                        --branch ${env.BRANCH_NAME} \
+                        --branch ${env.RESOLVED_BRANCH} \
                         --stage promote
                     """
                     echo "Promotion completed."
