@@ -18,22 +18,34 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME  = "network-template-gitops"
-        DOCKER_BIN  = "/usr/local/bin/docker"
-        ENV_FILE    = "${WORKSPACE}/.env"
-        PATH        = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        IMAGE_NAME      = "network-template-gitops"
+        DOCKER_BIN      = "/usr/local/bin/docker"
+        ENV_FILE        = "${WORKSPACE}/.env"
+        PATH            = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        TEMPLATE_REPO   = "prajravi/catalyst-template-library"
     }
 
     stages {
 
-        stage('Resolve Branch') {
+        stage('Resolve Branch & Commit') {
             steps {
                 script {
                     // BRANCH_NAME is only set in multibranch pipelines.
                     // For a regular pipeline job, derive from GIT_BRANCH (e.g. "origin/main" -> "main").
                     env.RESOLVED_BRANCH = env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceFirst(/^origin\//, '') ?: 'main'
+
+                    // GIT_COMMIT is the pipeline repo commit, not the template library commit.
+                    // Fetch the latest commit SHA from the template library repo.
+                    def ghToken = sh(script: "grep '^GITHUB_TOKEN=' ${ENV_FILE} | cut -d'=' -f2", returnStdout: true).trim()
+                    env.TEMPLATE_COMMIT = sh(
+                        script: """curl -s -H "Authorization: token ${ghToken}" \
+                            "https://api.github.com/repos/${TEMPLATE_REPO}/commits/${env.RESOLVED_BRANCH}" \
+                            | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])" """,
+                        returnStdout: true
+                    ).trim()
+
                     echo "Resolved branch: ${env.RESOLVED_BRANCH}"
-                    echo "Commit SHA: ${env.GIT_COMMIT}"
+                    echo "Template library commit: ${env.TEMPLATE_COMMIT}"
                 }
             }
         }
@@ -63,7 +75,7 @@ pipeline {
                     ${DOCKER_BIN} run --rm \
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
-                        --commit ${env.GIT_COMMIT} \
+                        --commit ${env.TEMPLATE_COMMIT} \
                         --branch ${env.RESOLVED_BRANCH} \
                         --stage validate-stage
                     """
@@ -80,7 +92,7 @@ pipeline {
                     ${DOCKER_BIN} run --rm \
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
-                        --commit ${env.GIT_COMMIT} \
+                        --commit ${env.TEMPLATE_COMMIT} \
                         --branch ${env.RESOLVED_BRANCH} \
                         --stage drift-check
                     """
@@ -109,7 +121,7 @@ pipeline {
                     ${DOCKER_BIN} run --rm \
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
-                        --commit ${env.GIT_COMMIT} \
+                        --commit ${env.TEMPLATE_COMMIT} \
                         --branch ${env.RESOLVED_BRANCH} \
                         --stage drift-check
                     """
@@ -129,7 +141,7 @@ pipeline {
                     ${DOCKER_BIN} run --rm \
                         --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
-                        --commit ${env.GIT_COMMIT} \
+                        --commit ${env.TEMPLATE_COMMIT} \
                         --branch ${env.RESOLVED_BRANCH} \
                         --stage promote
                     """
