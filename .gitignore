@@ -1,0 +1,24 @@
+# -------------------------------------------------------------------
+# .gitignore for Network Template GitOps
+# -------------------------------------------------------------------
+
+# Local credentials -- never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

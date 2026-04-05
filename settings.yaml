@@ -1,0 +1,16 @@
+# -------------------------------------------------------------------
+# Settings for Network Template GitOps
+# -------------------------------------------------------------------
+
+# Suffixes appended to the Git folder name to derive
+# the Catalyst Center project names.
+# Example: folder "network-templates" maps to
+#   Stage project: "network-templates-stage"
+#   Prod  project: "network-templates-prod"
+stage_suffix: "-stage"
+prod_suffix: "-prod"
+
+# Template folders -- only .j2 files are allowed in these folders.
+# The drift-check stage will reject any non-.j2 file committed here.
+template_folders:
+  - network-templates
