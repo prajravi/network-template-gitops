@@ -1,21 +1,26 @@
 /*
  * Jenkinsfile for Network Template GitOps
  *
- * Runs on a local Jenkins instance with Docker support.
+ * Runs on a local Jenkins instance (macOS) with Docker.
+ * Each pipeline stage runs inside a container for isolation and
+ * reproducibility -- the same image can be deployed to any CI system.
+ *
  * Pipeline stages:
- *   1. Build Docker image
- *   2. Validate Stage  -- ensure templates exist in Stage project
- *   3. Drift Check     -- Git content == Stage content
- *   4. Approval Gate   -- manual approval by a senior engineer
- *   5. Re-validate Drift -- ensure nothing changed after approval
- *   6. Promote         -- import templates from Stage into Prod project
+ *   1. Docker Build       -- build the application image
+ *   2. Validate Stage     -- ensure templates exist in Stage project
+ *   3. Drift Check        -- Git content == Stage content
+ *   4. Approval Gate      -- manual approval by a senior engineer
+ *   5. Re-validate Drift  -- ensure nothing changed after approval
+ *   6. Promote            -- import templates from Stage into Prod project
  */
 
 pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "network-template-gitops"
+        IMAGE_NAME  = "network-template-gitops"
+        DOCKER_BIN  = "/usr/local/bin/docker"
+        ENV_FILE    = "${WORKSPACE}/.env"
     }
 
     stages {
@@ -23,8 +28,15 @@ pipeline {
         stage('Docker Build') {
             steps {
                 script {
+                    sh """
+                    if [ ! -f ${ENV_FILE} ]; then
+                        echo "ERROR: .env file not found at ${ENV_FILE}"
+                        echo "Copy your .env into the Jenkins workspace first."
+                        exit 1
+                    fi
+                    """
                     echo "--- Building Docker image: ${IMAGE_NAME}:latest ---"
-                    sh "docker build -t ${IMAGE_NAME}:latest ."
+                    sh "${DOCKER_BIN} build -t ${IMAGE_NAME}:latest ."
                     echo "Build completed."
                 }
             }
@@ -35,8 +47,8 @@ pipeline {
                 script {
                     echo "--- Validating templates exist in Stage project ---"
                     sh """
-                    docker run --rm \
-                        --env-file .env \
+                    ${DOCKER_BIN} run --rm \
+                        --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
                         --branch ${env.BRANCH_NAME} \
@@ -52,8 +64,8 @@ pipeline {
                 script {
                     echo "--- Checking for drift: Git vs Stage ---"
                     sh """
-                    docker run --rm \
-                        --env-file .env \
+                    ${DOCKER_BIN} run --rm \
+                        --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
                         --branch ${env.BRANCH_NAME} \
@@ -81,8 +93,8 @@ pipeline {
                 script {
                     echo "--- Re-validating drift after approval ---"
                     sh """
-                    docker run --rm \
-                        --env-file .env \
+                    ${DOCKER_BIN} run --rm \
+                        --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
                         --branch ${env.BRANCH_NAME} \
@@ -101,8 +113,8 @@ pipeline {
                 script {
                     echo "--- Promoting templates from Stage to Prod ---"
                     sh """
-                    docker run --rm \
-                        --env-file .env \
+                    ${DOCKER_BIN} run --rm \
+                        --env-file ${ENV_FILE} \
                         ${IMAGE_NAME}:latest \
                         --commit ${env.GIT_COMMIT} \
                         --branch ${env.BRANCH_NAME} \
@@ -116,7 +128,7 @@ pipeline {
 
     post {
         always {
-            sh "docker images ${IMAGE_NAME} -q | xargs docker rmi -f || true"
+            sh "${DOCKER_BIN} rmi ${IMAGE_NAME}:latest || true"
         }
         failure {
             echo "Pipeline failed. Check the logs above for details."
