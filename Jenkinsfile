@@ -36,9 +36,11 @@ pipeline {
 
                     // GIT_COMMIT is the pipeline repo commit, not the template library commit.
                     // Fetch the latest commit SHA from the template library repo.
-                    def ghToken = sh(script: "grep '^GITHUB_TOKEN=' ${ENV_FILE} | cut -d'=' -f2", returnStdout: true).trim()
+                    // set +x suppresses shell tracing to prevent secrets from appearing in logs.
+                    def ghToken = sh(script: "set +x; grep '^GITHUB_TOKEN=' ${ENV_FILE} | cut -d'=' -f2", returnStdout: true).trim()
                     env.TEMPLATE_COMMIT = sh(
-                        script: """curl -s -H "Authorization: token ${ghToken}" \
+                        script: """set +x
+                            curl -s -H "Authorization: token ${ghToken}" \
                             "https://api.github.com/repos/${TEMPLATE_REPO}/commits/${env.RESOLVED_BRANCH}" \
                             | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])" """,
                         returnStdout: true

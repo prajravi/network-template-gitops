@@ -29,17 +29,18 @@ Engineer edits template in Stage project (Catalyst Center)
   Exports template and commits to Git (creates a Pull Request)
          |
          v
-  CI Pipeline (Jenkins):
-    1. Build Docker image
-    2. Validate Stage  -- template exists in Stage project
-    3. Drift Check     -- Git content == Stage content
+  CI Pipeline (Jenkins) -- triggered manually or via webhook:
+    1. Resolve Branch & Commit  -- identify the template library commit
+    2. Build Docker image       -- containerized execution environment
+    3. Validate Stage           -- template exists in Stage project
+    4. Drift Check              -- Git content == Stage content
          |
          v
-  Approval Gate (Senior Engineer reviews the PR in Jenkins)
+  Approval Gate (Senior Engineer clicks "Proceed" in Jenkins console)
          |
          v
-    4. Re-validate drift -- ensure Stage has not changed since approval
-    5. Promote           -- import template from Stage project into Prod project
+    5. Re-validate Drift  -- ensure Stage has not changed since approval
+    6. Promote             -- import template from Stage into Prod project
 ```
 
 ### Environment Layout
@@ -76,8 +77,8 @@ network-template-gitops/
     __main__.py          # Entry point, logging config, pipeline stage logic
     error_handler.py     # Custom exception classes
     utils.py             # Catalyst Center SDK, GitHub API, and general helpers
-  Dockerfile             # Production image
-  Jenkinsfile            # CI/CD pipeline definition
+  Dockerfile             # Production image (Python 3.10-slim)
+  Jenkinsfile            # CI/CD pipeline definition (Docker-based)
   requirements.txt       # Python dependencies
   settings.yaml          # Project name suffixes and template folders
   .env.example           # Template for local credentials
@@ -92,7 +93,7 @@ network-template-gitops/
 ### Prerequisites
 
 - Python 3.10+
-- Docker (for containerized runs and Jenkins)
+- Docker Desktop (for containerized runs and Jenkins)
 - Jenkins (installed locally or via Docker)
 - A GitHub personal access token with `repo` read access
 - Network access to your Catalyst Center instance
@@ -126,79 +127,125 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Run the pipeline stages manually
+### 3. Find the commit SHA from the template library
 
+The `--commit` argument expects a commit SHA from the **template library repo**
+(not this pipeline repo). Use one of these methods:
+
+**Option A -- Latest commit on a branch (recommended):**
 ```bash
-# Validate templates exist in Stage project
-python -m app --commit <sha> --branch main --stage validate-stage
-
-# Check for drift between Git and Stage
-python -m app --commit <sha> --branch main --stage drift-check
-
-# Validate Prod project exists
-python -m app --commit <sha> --branch main --stage validate-prod
-
-# Promote from Stage to Prod
-python -m app --commit <sha> --branch main --stage promote
+curl -s -H "Authorization: token $GITHUB_TOKEN" \
+  "https://api.github.com/repos/prajravi/catalyst-template-library/commits/main" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])"
 ```
 
-For feature branches (compares all changes against main):
+**Option B -- From the GitHub UI:**
+1. Go to https://github.com/prajravi/catalyst-template-library/commits/main
+2. Click the commit you want to process.
+3. Copy the full 40-character SHA from the URL or the page header.
+
+**Option C -- Using git CLI (if you have the repo cloned):**
+```bash
+cd /path/to/catalyst-template-library
+git log --oneline -5   # pick the SHA you want
+```
+
+### 4. Run the pipeline stages locally
+
+```bash
+# Set a variable for convenience
+COMMIT_SHA=<paste-sha-from-step-3>
+
+# Validate templates exist in Stage project
+python -m app --commit $COMMIT_SHA --branch main --stage validate-stage
+
+# Check for drift between Git and Stage
+python -m app --commit $COMMIT_SHA --branch main --stage drift-check
+
+# Validate Prod project exists
+python -m app --commit $COMMIT_SHA --branch main --stage validate-prod
+
+# Promote from Stage to Prod
+python -m app --commit $COMMIT_SHA --branch main --stage promote
+```
+
+For feature branches (compares all changes against main -- no commit SHA needed):
 
 ```bash
 python -m app --branch feature/update-acl --stage validate-stage
 ```
 
-### 4. Run via Docker
+### 5. Run via Docker
 
 ```bash
 docker build -t network-template-gitops .
+
 docker run --rm --env-file .env network-template-gitops \
-    --commit <sha> --branch main --stage promote
+    --commit $COMMIT_SHA --branch main --stage promote
 ```
 
 ---
 
-## Jenkins Setup (Local)
+## Jenkins Setup
 
-### Option A: Jenkins via Docker
-
-```bash
-docker run -d \
-  --name jenkins \
-  -p 8080:8080 -p 50000:50000 \
-  -v jenkins_home:/var/jenkins_home \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  jenkins/jenkins:lts
-```
-
-Retrieve the initial admin password:
+### Install Jenkins (macOS)
 
 ```bash
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+brew install jenkins-lts
+brew services start jenkins-lts
 ```
 
-Install the suggested plugins plus the **Pipeline** and **Docker Pipeline** plugins.
-
-### Option B: Jenkins installed natively
-
-Follow the official Jenkins installation guide for macOS. Ensure Docker is available on the Jenkins agent.
+Open http://localhost:8080 and complete the setup wizard. Install the
+suggested plugins plus the **Pipeline** plugin.
 
 ### Create a Pipeline Job
 
-1. New Item -> Pipeline.
-2. Under Pipeline, select "Pipeline script from SCM".
-3. Set SCM to Git, repository URL to your network-template-gitops repo.
-4. Script Path: `Jenkinsfile`.
-5. Under Build Triggers, configure a webhook or poll SCM as needed.
-6. Place a `.env` file in the Jenkins workspace (or inject environment variables via Jenkins credentials).
+1. **New Item** -> enter a name (e.g. `network-template-gitops`) -> **Pipeline** -> OK.
+2. Under **Pipeline**, select **Pipeline script from SCM**.
+3. Set SCM to **Git**, repository URL:
+   ```
+   https://github.com/prajravi/network-template-gitops.git
+   ```
+4. Branch Specifier: `*/main`
+5. Script Path: `Jenkinsfile`
+6. Click **Save**.
 
-The Jenkinsfile defines these stages:
-1. **Docker Build** -- builds the application image.
-2. **Validate Stage** -- ensures templates exist in the Stage project.
-3. **Drift Check** -- verifies Git content matches Stage.
-4. **Approval Gate** -- manual approval (main branch only).
-5. **Re-validate Drift** -- confirms nothing changed after approval.
-6. **Promote to Prod** -- imports templates from Stage into Prod.
+### Copy credentials to the Jenkins workspace
+
+Jenkins needs a `.env` file in its workspace directory. Copy it once:
+
+```bash
+cp /path/to/your/.env ~/.jenkins/workspace/<job-name>/.env
+```
+
+> Replace `<job-name>` with the name you chose when creating the pipeline job
+> (e.g. `network-template-gitops`). The `~/.jenkins/workspace/` path is the
+> default on macOS; adjust if your Jenkins home is elsewhere.
+
+### Pipeline Stages (Jenkinsfile)
+
+The Jenkinsfile defines a Docker-based pipeline. Each stage runs inside a
+freshly built container for isolation and reproducibility.
+
+| # | Stage | What it does |
+|---|---|---|
+| 1 | **Resolve Branch & Commit** | Determines the Git branch and fetches the latest commit SHA from the template library repo (not the pipeline repo). |
+| 2 | **Docker Build** | Builds the application Docker image. Verifies `.env` exists in the workspace. |
+| 3 | **Validate Stage** | Runs the app with `--stage validate-stage`. Confirms every changed template exists in the Stage project on Catalyst Center. |
+| 4 | **Drift Check** | Runs `--stage drift-check`. Compares Git file content against the Stage project -- they must match. |
+| 5 | **Approval Gate** | Pauses the pipeline and waits for a human to click **Proceed** in the Jenkins console. Main branch only. |
+| 6 | **Re-validate Drift** | Runs drift-check again after approval to ensure nothing changed while waiting. Main branch only. |
+| 7 | **Promote to Prod** | Runs `--stage promote`. Exports each template from Stage and imports it into the Prod project. Main branch only. |
+
+Stages 5-7 only execute on the `main` branch. Feature branches run stages 1-4
+only, making them safe for pre-merge validation.
+
+### Triggering the Pipeline
+
+- **Manual:** Click **Build Now** in the Jenkins dashboard.
+- **Webhook (production):** Configure a GitHub webhook pointing to
+  `http://<jenkins-url>/github-webhook/` on push events to the template library
+  repo.
 
 ---
 
@@ -216,6 +263,17 @@ template_folders:
 - `stage_suffix` / `prod_suffix`: Appended to the Git folder name to derive Catalyst Center project names.
 - `template_folders`: Folders where only `.j2` files are allowed (enforced by drift-check).
 
+### Environment Variables (.env)
+
+| Variable | Required | Description |
+|---|---|---|
+| `CATC_BASE_URL` | Yes | Catalyst Center URL (e.g. `https://10.10.20.85`) |
+| `CATC_USERNAME` | Yes | Authentication username |
+| `CATC_PASSWORD` | Yes | Authentication password |
+| `CATC_VERIFY_SSL` | No | Set to `false` for self-signed certificates (default: `true`) |
+| `GITHUB_TOKEN` | Yes | Personal access token with `repo` read access |
+| `GITHUB_REPO_API` | No | Override the template library API URL |
+
 ---
 
 ## CLI Reference
@@ -224,10 +282,26 @@ template_folders:
 python -m app [OPTIONS]
 
 Options:
-  --commit TEXT    Commit SHA to process (required for main branch)
+  --commit TEXT    Commit SHA from the template library repo (required for main branch)
   --branch TEXT    Branch name (default: main)
   --stage TEXT     Pipeline stage: validate-stage | validate-prod | drift-check | promote
 ```
+
+---
+
+## Architecture: Demo vs Production
+
+This project is set up for a **local demo** environment. In a production deployment,
+the architecture would differ:
+
+| Aspect | Demo (this project) | Production |
+|---|---|---|
+| Jenkins | Local macOS install | Centralized Jenkins server or cloud CI |
+| Trigger | Manual "Build Now" | GitHub webhook on push/PR |
+| Approval | Jenkins console click | PR review + branch protection rules |
+| Docker | Docker Desktop | Containerized CI agents |
+| Secrets | `.env` file in workspace | Jenkins credentials / Vault |
+| Catalyst Center | Single instance (Stage + Prod projects) | Separate Stage and Prod instances possible |
 
 ---
 
