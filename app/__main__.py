@@ -24,6 +24,7 @@ from app.utils import (
     list_templates_in_project,
     export_template_from_project,
     import_template_to_project,
+    delete_template_from_project,
     get_modified_files_in_commit,
     retrieve_file_content,
     get_modified_files_in_branch,
@@ -203,28 +204,18 @@ def is_template_in_project(cc, project_name, tmpl_name):
 
 def handle_deleted_template(changed_file, tmpl_name, stage_proj_name, cc=None):
     """
-    Handle a file that was deleted in Git.
-    If the template still exists in the Stage project an error is raised,
-    because it must be removed from Catalyst Center first.
+    Check whether a file was deleted in Git.
+    Deleted templates are skipped during validation and drift checks.
+    Actual deletion from Prod is handled in the promote stage.
 
     :param changed_file: File dictionary from commit data.
     :param tmpl_name: Template name derived from the path.
-    :param stage_proj_name: Stage project name on Catalyst Center.
-    :param cc: Optional DNACenterAPI instance for existence check.
+    :param stage_proj_name: Stage project name (used for logging).
+    :param cc: Unused, kept for call-site compatibility.
     :return: True if deleted and safe to skip, False if not deleted.
-    :raises CatalystAPIError: If deleted in Git but present in Catalyst Center.
     """
     if changed_file.get("status") != "removed":
         return False
-
-    if cc is not None and is_template_in_project(cc, stage_proj_name, tmpl_name):
-        msg = (
-            f"Template '{tmpl_name}' is deleted in Git but still exists in "
-            f"Catalyst Center project '{stage_proj_name}'. "
-            f"Remove it from Stage first."
-        )
-        logger.error(msg)
-        raise CatalystAPIError(msg)
 
     logger.info(
         f"Skipping deleted template: {tmpl_name} in {stage_proj_name}"
@@ -406,6 +397,22 @@ def promote_to_production(commit_sha, branch, config):
         if handle_deleted_template(
             changed_file, tmpl_name, stage_proj_name, cc
         ):
+            try:
+                delete_template_from_project(cc, prod_proj_name, tmpl_name)
+                logger.info(
+                    f"Deleted '{tmpl_name}' from Prod project "
+                    f"'{prod_proj_name}'. Stage project '{stage_proj_name}' "
+                    f"left intact."
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to delete '{tmpl_name}' from "
+                    f"'{prod_proj_name}': {e}"
+                )
+                raise CatalystAPIError(
+                    f"Failed to delete '{tmpl_name}' "
+                    f"from '{prod_proj_name}': {e}"
+                ) from e
             continue
 
         file_status = changed_file.get("status", "")

@@ -235,7 +235,7 @@ freshly built container for isolation and reproducibility.
 | 4 | **Drift Check** | Runs `--stage drift-check`. Compares Git file content against the Stage project -- they must match. |
 | 5 | **Approval Gate** | Pauses the pipeline and waits for a human to click **Proceed** in the Jenkins console. Main branch only. |
 | 6 | **Re-validate Drift** | Runs drift-check again after approval to ensure nothing changed while waiting. Main branch only. |
-| 7 | **Promote to Prod** | Runs `--stage promote`. Exports each template from Stage and imports it into the Prod project. Main branch only. |
+| 7 | **Promote to Prod** | Runs `--stage promote`. Exports each template from Stage and imports it into the Prod project. If a template was deleted in Git, it is removed from Prod (Stage copy is preserved). Main branch only. |
 
 Stages 5-7 only execute on the `main` branch. Feature branches run stages 1-4
 only, making them safe for pre-merge validation.
@@ -289,12 +289,12 @@ Options:
 
 ---
 
-## Architecture: Demo vs Production
+## Architecture: Current Project vs Production
 
-This project is set up for a **local demo** environment. In a production deployment,
+This project is set up for a **local development** environment. In a production deployment,
 the architecture would differ:
 
-| Aspect | Demo (this project) | Production |
+| Aspect | Current Project | Production |
 |---|---|---|
 | Jenkins | Local macOS install | Centralized Jenkins server or cloud CI |
 | Trigger | Manual "Build Now" | GitHub webhook on push/PR |

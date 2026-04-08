@@ -294,6 +294,47 @@ def import_template_to_project(cc, project_name, template):
         ) from e
 
 
+def delete_template_from_project(cc, project_name, tmpl_name):
+    """
+    Delete a template from a Catalyst Center project.
+
+    :param cc: DNACenterAPI instance.
+    :param project_name: Name of the project containing the template.
+    :param tmpl_name: Name of the template to delete.
+    :raises ProjectMissingError: If the project does not exist.
+    :raises CatalystAPIError: If the template is not found or deletion fails.
+    """
+    try:
+        project = fetch_project_by_name(cc, project_name)
+        if project is None:
+            raise ProjectMissingError(project_name)
+        for tmpl in list_templates_in_project(project):
+            if tmpl["name"] == tmpl_name:
+                cc.configuration_templates.deletes_the_template(
+                    template_id=tmpl["id"]
+                )
+                logger.info(
+                    f"Deleted template '{tmpl_name}' from "
+                    f"project '{project_name}'."
+                )
+                return
+        logger.warning(
+            f"Template '{tmpl_name}' not found in project "
+            f"'{project_name}'. Nothing to delete."
+        )
+    except (ProjectMissingError, CatalystAPIError):
+        raise
+    except Exception as e:
+        logger.exception(
+            f"Failed to delete template '{tmpl_name}' "
+            f"from project '{project_name}'."
+        )
+        raise CatalystAPIError(
+            f"Failed to delete template '{tmpl_name}' "
+            f"from '{project_name}'.", e
+        ) from e
+
+
 # ---------------------------------------------------------------------------
 # GitHub API functions
 # ---------------------------------------------------------------------------
